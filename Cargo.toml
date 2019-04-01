@@ -5,8 +5,13 @@ authors = ["Amit Aryeh Levy <amit@amitlevy.com>"]
 edition = "2018"
 build = "build.rs"
 
+[workspace]
+members = ["user/teststd", "user/testapp", "user/libt"]
+
 [dependencies]
+libt = {path = "user/libt" }
 libc = "*"
+libloading = "*"
 
 [build-dependencies]
 cc = "1"

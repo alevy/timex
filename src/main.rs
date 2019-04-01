@@ -1,9 +1,9 @@
 use std::collections::VecDeque;
-use std::cell::RefCell;
 use libc::c_int;
 
 pub struct UContext {
     ctx: *const usize,
+    console_buf: Option<&'static libt::Writer>,
     _stack: Option<Box<[u8]>>,
 }
 
@@ -19,11 +19,12 @@ impl UContext {
     pub fn alloc() -> Self {
         UContext {
             ctx: unsafe { ucontext_alloc() },
+            console_buf: None,
             _stack: None,
         }
     }
 
-    pub fn new(func: fn(), stack: Box<[u8]>, link: Option<&UContext>) -> Self {
+    pub fn new(func: fn(), stack: Box<[u8]>, console_buf: Option<&'static libt::Writer>, link: Option<&UContext>) -> Self {
         extern fn trampoline(f: fn()) {
             f()
         }
@@ -35,13 +36,14 @@ impl UContext {
         };
         UContext {
             ctx: ctx,
+            console_buf: console_buf,
             _stack: Some(stack),
         }
     }
 
-    pub fn swap_with(&self, to: &UContext) {
+    pub fn swap_with(&self, to: *const usize) {
         unsafe {
-            if swapcontext(self.ctx, to.ctx) < 0 {
+            if swapcontext(self.ctx, to) < 0 {
                 panic!("Error swapping context");
             }
         }
@@ -58,21 +60,7 @@ impl UContext {
 
 impl Drop for UContext {
     fn drop(&mut self) {
-        //unsafe { ucontext_free(self.ctx) };
-    }
-}
-
-fn f1() {
-    for i in 0.. {
-        let s = format!("f1 {}!\n", i);
-        println(s.as_str());
-    }
-}
-
-fn f2() {
-    for i in 0.. {
-        let s = format!("f2 {}!\n", i);
-        println(s.as_str());
+        unsafe { ucontext_free(self.ctx) };
     }
 }
 
@@ -87,35 +75,49 @@ extern {
     fn write(fd: usize, s: *const u8, len: usize);
 }
 
-fn println(s: &str) {
+#[no_mangle]
+#[inline(never)]
+pub fn println(s: &str) {
     unsafe {
         write(0, s.as_ptr(), s.len())
     }
 }
 
-thread_local!(
-    static CTXS: RefCell<VecDeque<UContext>> = RefCell::new(VecDeque::new());
-    static CUR_CTX: RefCell<Option<UContext>> = RefCell::new(None);
-);
-
-static mut MAIN_CTX: UContext = UContext { ctx: 0 as *const _, _stack: None };
+static mut CUR_CTX: Option<UContext> = None;
+static mut MAIN_CTX: UContext = UContext { ctx: 0 as *const _, console_buf: None, _stack: None };
 
 extern fn interrupt(_:u32) {
     //println("Interrupted!");
     unsafe {
-        let ctx = CUR_CTX.with(|ctx| {
-            ctx.borrow().as_ref().map(|ctx| UContext { ctx: ctx.ctx, _stack: None })
-        });
-        if let Some(c) = ctx {
-            c.swap_with(&MAIN_CTX);
+        if let Some(c) = CUR_CTX.as_ref() {
+            c.swap_with(MAIN_CTX.ctx);
         } else {
             MAIN_CTX.swap_to();
         }
     }
 }
 
-fn main() {
-    println("Hello, world!");
+fn main() -> libloading::Result<()> {
+    use libloading as lib;
+    use std::env;
+
+    let args: Vec<String> = env::args().collect();
+    println!("{:?}", args);
+
+    let mc = unsafe {
+        MAIN_CTX = UContext::alloc();
+        &MAIN_CTX
+    };
+
+    let mut run_queue: VecDeque<UContext> = VecDeque::new();
+    for app_path in args[1..].iter() {
+        let test1 = lib::Library::new(app_path)?;
+        let test1_init = unsafe { test1.get(b"main")? };
+        let test1_console = unsafe { test1.get(b"WRITER").map(|t| *t).ok() };
+        run_queue.push_back(UContext::new(*test1_init, Box::new([0; 100 * 1024]), test1_console, Some(&mc)));
+        std::mem::forget(test1);
+    }
+
 
     unsafe {
         libc::signal(libc::SIGPROF, interrupt as libc::sighandler_t);
@@ -132,31 +134,21 @@ fn main() {
         setitimer(2 /* ITIMER_PROF */, &interval, ::std::ptr::null());
     }
 
-    let mc = unsafe {
-        MAIN_CTX = UContext::alloc();
-        &MAIN_CTX
-    };
-
-    CTXS.with(|ctxs| {
-        let mut c = ctxs.borrow_mut();
-        c.push_back(UContext::new(f1, Box::new([0; 100 * 1024]), Some(&mc)));
-        c.push_back(UContext::new(f2, Box::new([0; 100 * 1024]), Some(&mc)));
-    });
-
-    for _ in 0.. {
-        if let Some(ctx) = CTXS.with(|ctxs| ctxs.borrow_mut().pop_front()) {
-            let cop = CUR_CTX.with(|cur| {
-                let cop = UContext { ctx: ctx.ctx, _stack: None };
-                cur.borrow_mut().replace(ctx);
-                cop
-            });
-            CUR_CTX.with(|cur| {
-                mc.swap_with(&cop);
-                CTXS.with(|ctxs| {
-                    if let Some(c) = cur.borrow_mut().take() {
-                        ctxs.borrow_mut().push_back(c);
+    loop {
+        if let Some(ctx) = run_queue.pop_front() {
+            let uctx = ctx.ctx;
+            unsafe { CUR_CTX.replace(ctx); }
+            mc.swap_with(uctx);
+            unsafe { CUR_CTX.take() }.map(|mut c| {
+                // drain console buffer
+                c.console_buf.as_mut().map(|writer| {
+                    let mut buf = [0; 256];
+                    let len = writer.read(&mut buf);
+                    unsafe {
+                        write(0, buf.as_ptr(), len);
                     }
-                })
+                });
+                run_queue.push_back(c)
             });
         } else {
             break;
@@ -164,5 +156,6 @@ fn main() {
     }
 
     println("Done");
+    Ok(())
 }
 

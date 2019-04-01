@@ -1,0 +1,7 @@
+[package]
+name = "libt"
+version = "0.1.0"
+authors = ["Amit Aryeh Levy <amit@amitlevy.com>"]
+edition = "2018"
+
+[dependencies]
