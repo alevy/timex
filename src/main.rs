@@ -3,7 +3,7 @@ use libc::c_int;
 
 pub struct UContext {
     ctx: *const usize,
-    console_buf: Option<&'static libt::Writer>,
+    console_buf: Option<&'static libttypes::Writer>,
     _stack: Option<Box<[u8]>>,
 }
 
@@ -24,7 +24,7 @@ impl UContext {
         }
     }
 
-    pub fn new(func: fn(), stack: Box<[u8]>, console_buf: Option<&'static libt::Writer>, link: Option<&UContext>) -> Self {
+    pub fn new(func: fn(), stack: Box<[u8]>, console_buf: Option<&'static libttypes::Writer>, link: Option<&UContext>) -> Self {
         extern fn trampoline(f: fn()) {
             f()
         }

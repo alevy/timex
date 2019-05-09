@@ -6,15 +6,12 @@ edition = "2018"
 build = "build.rs"
 
 [workspace]
-members = ["user/testapp", "user/testapp2", "user/libt"]
+members = ["user/testapp", "user/testapp2", "user/libt", "libttypes"]
 
 [dependencies]
+libttypes = { path = "libttypes" }
 libc = "*"
 libloading = "*"
-
-[dependencies.libt]
-path = "user/libt"
-default-features = false
 
 [build-dependencies]
 cc = "1"
