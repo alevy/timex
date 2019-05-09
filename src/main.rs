@@ -75,14 +75,6 @@ extern {
     fn write(fd: usize, s: *const u8, len: usize);
 }
 
-#[no_mangle]
-#[inline(never)]
-pub fn println(s: &str) {
-    unsafe {
-        write(0, s.as_ptr(), s.len())
-    }
-}
-
 static mut CUR_CTX: Option<UContext> = None;
 static mut MAIN_CTX: UContext = UContext { ctx: 0 as *const _, console_buf: None, _stack: None };
 
@@ -124,11 +116,11 @@ fn main() -> libloading::Result<()> {
         let interval = ITimerval {
             it_interval: libc::timeval {
                 tv_sec: 0,
-                tv_usec: 1000,
+                tv_usec: 10000,
             },
             it_value: libc::timeval {
                 tv_sec: 0,
-                tv_usec: 1000,
+                tv_usec: 10000,
             },
         };
         setitimer(2 /* ITIMER_PROF */, &interval, ::std::ptr::null());
@@ -145,7 +137,7 @@ fn main() -> libloading::Result<()> {
                     let mut buf = [0; 256];
                     let len = writer.read(&mut buf);
                     unsafe {
-                        write(0, buf.as_ptr(), len);
+                        write(1, buf.as_ptr(), len);
                     }
                 });
                 run_queue.push_back(c)
@@ -155,7 +147,7 @@ fn main() -> libloading::Result<()> {
         }
     }
 
-    println("Done");
+    println!("Done");
     Ok(())
 }
 
