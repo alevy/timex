@@ -1,6 +1,8 @@
+#![feature(lang_items)]
 #![no_std]
 
 use core::sync::atomic::{AtomicUsize, Ordering};
+use core::fmt::{self, Write};
 
 pub struct Writer {
     wcur: usize,
@@ -34,15 +36,41 @@ impl Writer {
     }
 }
 
-impl ::core::fmt::Write for Writer {
-    fn write_str(&mut self, s: &str) -> ::core::result::Result<(), ::core::fmt::Error> {
+impl Write for Writer {
+    fn write_str(&mut self, s: &str) -> Result<(), fmt::Error> {
         for byte in s.as_bytes().iter() {
             let wcur = (self.wcur + 1) % self.buf.len();
-            while wcur == self.rcur.load(Ordering::Relaxed) {}
+            while wcur == self.rcur.load(Ordering::Relaxed) { }
             self.buf[wcur] = *byte;
             self.wcur = wcur;
         }
         Ok(())
     }
+}
+
+#[macro_export]
+macro_rules! print {
+    ($($arg:tt)*) => ({
+        use core::fmt::Write;
+        write!(unsafe {&mut WRITER }, $($arg)*).unwrap()
+    });
+}
+
+#[macro_export]
+macro_rules! println {
+    ($fmt:expr) => ($crate::print!(concat!($fmt, "\n")));
+    ($fmt:expr, $($arg:tt)*) => ($crate::print!(concat!($fmt, "\n"), $($arg)*));
+}
+
+#[cfg(feature = "nostd")]
+mod base {
+    use core::panic::PanicInfo;
+    #[panic_handler]
+    fn panic(_info: &PanicInfo) -> ! {
+        loop {}
+    }
+
+    #[lang = "eh_personality"]
+    fn eh_personality() {}
 }
 
