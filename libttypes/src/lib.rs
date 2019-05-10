@@ -4,6 +4,8 @@
 use core::sync::atomic::{AtomicUsize, Ordering};
 use core::fmt::{self, Write};
 
+pub mod ucontext;
+
 pub struct Writer {
     wcur: usize,
     rcur: AtomicUsize,

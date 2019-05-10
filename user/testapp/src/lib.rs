@@ -1,10 +1,12 @@
 #![no_std]
 
-use libt::println;
+use libt::*;
+use core::str::from_utf8;
 
-#[no_mangle]
-pub fn main() {
+start!({
+    let name = from_utf8(args()).unwrap_or(&"");
     for i in 0.. {
-        println!("t1 {}", i);
+        println!("{} {}", name, i);
+        wait();
     }
-}
+});

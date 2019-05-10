@@ -1,11 +1,10 @@
 #![feature(lang_items)]
 #![no_std]
 
-use libt::println;
+use libt::*;
 
-#[no_mangle]
-pub fn main() {
+start!({
     for i in 0.. {
-        let _ = println!("t2 {}", i);
+        println!("t2 {}", i);
     }
-}
+});

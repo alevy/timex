@@ -29,6 +29,10 @@ dependencies = [
 [[package]]
 name = "libttypes"
 version = "0.1.0"
+dependencies = [
+ "cc 1.0.31 (registry+https://github.com/rust-lang/crates.io-index)",
+ "libc 0.2.50 (registry+https://github.com/rust-lang/crates.io-index)",
+]
 
 [[package]]
 name = "testapp"
@@ -48,7 +52,6 @@ dependencies = [
 name = "timex"
 version = "0.1.0"
 dependencies = [
- "cc 1.0.31 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.50 (registry+https://github.com/rust-lang/crates.io-index)",
  "libloading 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "libttypes 0.1.0",

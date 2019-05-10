@@ -1,64 +1,38 @@
 use std::collections::VecDeque;
-use libc::c_int;
+use libttypes::ucontext::*;
 
-pub struct UContext {
-    ctx: *const usize,
+pub struct Process {
+    ctx: Ctx,
     console_buf: Option<&'static libttypes::Writer>,
     _stack: Option<Box<[u8]>>,
 }
 
-extern {
-    fn ucontext_alloc() -> *const usize;
-    fn ucontext_new(trampoline: *const extern fn(), stack_ptr: *const u8, stack_len: usize, func: *const usize, link: *const usize) -> *const usize;
-    fn ucontext_free(ctx: *const usize);
-    fn swapcontext(ouc: *const usize, uc: *const usize) -> c_int;
-    fn setcontext(uc: *const usize) -> c_int;
-}
-
-impl UContext {
+impl Process {
     pub fn alloc() -> Self {
-        UContext {
+        Process {
             ctx: unsafe { ucontext_alloc() },
             console_buf: None,
             _stack: None,
         }
     }
 
-    pub fn new(func: fn(), stack: Box<[u8]>, console_buf: Option<&'static libttypes::Writer>, link: Option<&UContext>) -> Self {
-        extern fn trampoline(f: fn()) {
-            f()
+    pub fn new(func: *const extern fn(*const usize, usize, *const u8), mut stack: Box<[u8]>, cmd: &[u8], console_buf: Option<&'static libttypes::Writer>, link_ctx: Ctx) -> Self {
+        for (s, d) in cmd.iter().zip(stack.iter_mut()) {
+            *d = *s;
         }
-
-        let link_ctx = link.map(|l| l.ctx).unwrap_or(::std::ptr::null());
         let ctx = unsafe {
-            let t = trampoline as *const extern fn();
-            ucontext_new(t, stack.as_ptr(), stack.len(), func as *const usize, link_ctx)
+            let t = func;
+            ucontext_new(t, stack.as_ptr(), stack.len(), link_ctx, cmd.len(), stack.as_ptr())
         };
-        UContext {
+        Process {
             ctx: ctx,
             console_buf: console_buf,
             _stack: Some(stack),
         }
     }
-
-    pub fn swap_with(&self, to: *const usize) {
-        unsafe {
-            if swapcontext(self.ctx, to) < 0 {
-                panic!("Error swapping context");
-            }
-        }
-    }
-
-    pub fn swap_to(&self) {
-        unsafe {
-            if setcontext(self.ctx) < 0 {
-                panic!("Error swapping context");
-            }
-        }
-    }
 }
 
-impl Drop for UContext {
+impl Drop for Process {
     fn drop(&mut self) {
         unsafe { ucontext_free(self.ctx) };
     }
@@ -75,16 +49,15 @@ extern {
     fn write(fd: usize, s: *const u8, len: usize);
 }
 
-static mut CUR_CTX: Option<UContext> = None;
-static mut MAIN_CTX: UContext = UContext { ctx: 0 as *const _, console_buf: None, _stack: None };
+static mut CUR_PROCESS: Option<Process> = None;
+static mut MAIN_CTX: Ctx = 0 as Ctx;
 
 extern fn interrupt(_:u32) {
-    //println("Interrupted!");
     unsafe {
-        if let Some(c) = CUR_CTX.as_ref() {
-            c.swap_with(MAIN_CTX.ctx);
+        if let Some(c) = CUR_PROCESS.as_ref() {
+            libttypes::ucontext::swapcontext(c.ctx, MAIN_CTX);
         } else {
-            MAIN_CTX.swap_to();
+            libttypes::ucontext::setcontext(MAIN_CTX);
         }
     }
 }
@@ -97,41 +70,54 @@ fn main() -> libloading::Result<()> {
     println!("{:?}", args);
 
     let mc = unsafe {
-        MAIN_CTX = UContext::alloc();
-        &MAIN_CTX
+        MAIN_CTX = libttypes::ucontext::ucontext_alloc();
+        MAIN_CTX
     };
 
-    let mut run_queue: VecDeque<UContext> = VecDeque::new();
-    for app_path in args[1..].iter() {
+    let mut run_queue: VecDeque<Process> = VecDeque::new();
+    for (i, app_path) in args[1..].iter().enumerate() {
         let test1 = lib::Library::new(app_path)?;
-        let test1_init = unsafe { test1.get(b"main")? };
+        let test1_init = unsafe { test1.get(b"_start")? };
         let test1_console = unsafe { test1.get(b"WRITER").map(|t| *t).ok() };
-        run_queue.push_back(UContext::new(*test1_init, Box::new([0; 100 * 1024]), test1_console, Some(&mc)));
+        run_queue.push_back(Process::new(*test1_init, Box::new([0; 100 * 1024]), format!("Test{}", i).as_bytes(), test1_console, mc));
         std::mem::forget(test1);
     }
 
 
     unsafe {
         libc::signal(libc::SIGPROF, interrupt as libc::sighandler_t);
-        let interval = ITimerval {
-            it_interval: libc::timeval {
-                tv_sec: 0,
-                tv_usec: 10000,
-            },
-            it_value: libc::timeval {
-                tv_sec: 0,
-                tv_usec: 10000,
-            },
-        };
-        setitimer(2 /* ITIMER_PROF */, &interval, ::std::ptr::null());
     }
+    let mut interval = ITimerval {
+        it_interval: libc::timeval {
+            tv_sec: 0,
+            tv_usec: 10000,
+        },
+        it_value: libc::timeval {
+            tv_sec: 0,
+            tv_usec: 10000,
+        },
+    };
+    let null_time = ITimerval {
+        it_interval: libc::timeval {
+            tv_sec: 0,
+            tv_usec: 00000,
+        },
+        it_value: libc::timeval {
+            tv_sec: 0,
+            tv_usec: 00000,
+        },
+    };
 
     loop {
         if let Some(ctx) = run_queue.pop_front() {
             let uctx = ctx.ctx;
-            unsafe { CUR_CTX.replace(ctx); }
-            mc.swap_with(uctx);
-            unsafe { CUR_CTX.take() }.map(|mut c| {
+            unsafe {
+                CUR_PROCESS.replace(ctx);
+                setitimer(2 /* ITIMER_PROF */, &interval, ::std::ptr::null());
+                libttypes::ucontext::swapcontext(mc, uctx);
+                setitimer(2 /* ITIMER_PROF */, &null_time, &mut interval);
+                CUR_PROCESS.take()
+            }.map(|mut c| {
                 // drain console buffer
                 c.console_buf.as_mut().map(|writer| {
                     let mut buf = [0; 256];

@@ -3,15 +3,11 @@ name = "timex"
 version = "0.1.0"
 authors = ["Amit Aryeh Levy <amit@amitlevy.com>"]
 edition = "2018"
-build = "build.rs"
 
 [workspace]
 members = ["user/testapp", "user/testapp2", "user/libt", "libttypes"]
 
 [dependencies]
 libttypes = { path = "libttypes" }
-libc = "*"
 libloading = "*"
-
-[build-dependencies]
-cc = "1"
+libc = "*"
