@@ -8,6 +8,7 @@ extern {
     pub fn ucontext_free(ctx: *const usize);
     pub fn swapcontext(ouc: *const usize, uc: *const usize) -> c_int;
     pub fn setcontext(uc: *const usize) -> c_int;
+    pub fn pause();
 }
 
 

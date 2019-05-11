@@ -6,15 +6,17 @@ use core::fmt::{self, Write};
 
 pub mod ucontext;
 
-pub struct Writer {
-    wcur: usize,
-    rcur: AtomicUsize,
-    buf: [u8; 256]
+pub use ucontext::pause;
+
+pub struct WaitFreeBuffer {
+    pub wcur: usize,
+    pub rcur: AtomicUsize,
+    pub buf: [u8; 256]
 }
 
-impl Writer {
-    pub const fn new() -> Writer {
-        Writer {
+impl WaitFreeBuffer {
+    pub const fn new() -> Self {
+        Self {
             buf: [0; 256],
             wcur: 0,
             rcur: AtomicUsize::new(0),
@@ -35,18 +37,6 @@ impl Writer {
 
         self.rcur.store(rcur, Ordering::Relaxed);
         len
-    }
-}
-
-impl Write for Writer {
-    fn write_str(&mut self, s: &str) -> Result<(), fmt::Error> {
-        for byte in s.as_bytes().iter() {
-            let wcur = (self.wcur + 1) % self.buf.len();
-            while wcur == self.rcur.load(Ordering::Relaxed) { }
-            self.buf[wcur] = *byte;
-            self.wcur = wcur;
-        }
-        Ok(())
     }
 }
 

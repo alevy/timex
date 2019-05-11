@@ -23,6 +23,7 @@ dependencies = [
 name = "libt"
 version = "0.1.0"
 dependencies = [
+ "libc 0.2.50 (registry+https://github.com/rust-lang/crates.io-index)",
  "libttypes 0.1.0",
 ]
 

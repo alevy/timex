@@ -2,17 +2,35 @@
 #![no_std]
 
 use core::sync::atomic::{AtomicBool, Ordering};
-use core::fmt::Write;
+use core::fmt::{self, Write};
 
-use libttypes::Writer;
+use libttypes::{pause, WaitFreeBuffer};
 
 pub use libttypes::ucontext::Ctx;
 
-#[export_name = "WRITER"]
-pub static mut WRITER: Writer = Writer::new();
+#[export_name = "CONSOLE_BUF"]
+pub static mut CONSOLE_BUF: WaitFreeBuffer = WaitFreeBuffer::new();
+
+struct Writer<'a>(&'a mut WaitFreeBuffer);
+
+impl<'a> Write for Writer<'a> {
+    fn write_str(&mut self, s: &str) -> Result<(), fmt::Error> {
+        for byte in s.as_bytes().iter() {
+            let wcur = (self.0.wcur + 1) % self.0.buf.len();
+            while wcur == self.0.rcur.load(Ordering::Relaxed) {
+                unsafe { pause();}
+            }
+            self.0.buf[wcur] = *byte;
+            self.0.wcur = wcur;
+        }
+        Ok(())
+    }
+}
+
+
 
 pub fn _print(args: core::fmt::Arguments) {
-    unsafe { &mut WRITER }.write_fmt(args).unwrap();
+    Writer(unsafe { &mut CONSOLE_BUF }).write_fmt(args).unwrap();
 }
 
 #[macro_export]

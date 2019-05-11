@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <signal.h>
 #include <ucontext.h>
 
 ucontext_t *ucontext_alloc(void) {
@@ -17,4 +18,10 @@ ucontext_t *ucontext_new(void(*start)(int, char*), void* stack_pointer, int stac
 
 void ucontext_free(ucontext_t *ctx) {
   free(ctx);
+}
+
+void pause() {
+  sigset_t mask;
+  sigemptyset(&mask);
+  sigsuspend(&mask);
 }
