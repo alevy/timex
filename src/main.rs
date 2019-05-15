@@ -56,7 +56,6 @@ fn main() -> libloading::Result<()> {
     use std::sync::mpsc::{channel, Sender};
 
     let args: Vec<String> = env::args().collect();
-    println!("{:?}", args);
 
     let (console_tx, console_rx): (Sender<&'static libttypes::WaitFreeBuffer>, _) = channel();
 
@@ -79,15 +78,17 @@ fn main() -> libloading::Result<()> {
         for console_buf in console_rx.iter() {
             // drain console buffer
             let mut buf = [0; 256];
+            let start = std::time::Instant::now();
             let len = console_buf.read(&mut buf);
             unsafe {
                 write(1, buf.as_ptr(), len);
             }
+            // TODO(alevy): how long is long enough that the buffer will always be written, but not
+            // _super_ duper long.
+            let exec_duration = start.elapsed();
+            let sleep_duration = std::time::Duration::from_micros(1000) - exec_duration;
+            std::thread::sleep(sleep_duration);
             console_tx.send(console_buf).unwrap();
-            // TODO(alevy): This is a (very bad) approximation of a pad. It's totally made up, but
-            // at least it's based on the length of the buffer. It's probably an overestimate, but
-            // who knows.
-            std::thread::sleep(std::time::Duration::from_micros((256 - len) as u64));
         }
     });
 
