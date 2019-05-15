@@ -1,5 +1,8 @@
-use std::collections::VecDeque;
 use libttypes::ucontext::*;
+use std::collections::VecDeque;
+use std::sync::mpsc::{channel, Sender};
+use std::thread;
+use std::time::{Duration, Instant};
 
 pub struct Process {
     ctx: Ctx,
@@ -7,13 +10,25 @@ pub struct Process {
 }
 
 impl Process {
-    pub fn new(func: *const extern fn(*const usize, usize, *const u8), mut stack: Box<[u8]>, cmd: &[u8], link_ctx: Ctx) -> Self {
+    pub fn new(
+        func: *const extern "C" fn(*const usize, usize, *const u8),
+        mut stack: Box<[u8]>,
+        cmd: &[u8],
+        link_ctx: Ctx,
+    ) -> Self {
         for (s, d) in cmd.iter().zip(stack.iter_mut()) {
             *d = *s;
         }
         let ctx = unsafe {
             let t = func;
-            ucontext_new(t, stack.as_ptr(), stack.len(), link_ctx, cmd.len(), stack.as_ptr())
+            ucontext_new(
+                t,
+                stack.as_ptr(),
+                stack.len(),
+                link_ctx,
+                cmd.len(),
+                stack.as_ptr(),
+            )
         };
         Process {
             ctx: ctx,
@@ -34,18 +49,22 @@ struct ITimerval {
     it_value: libc::timeval,    /* Time until next expiration */
 }
 
-extern {
-    fn setitimer(which: libc::c_int, new_value: &ITimerval, old_value: *const ITimerval) -> libc::c_int;
+extern "C" {
+    fn setitimer(
+        which: libc::c_int,
+        new_value: &ITimerval,
+        old_value: *const ITimerval,
+    ) -> libc::c_int;
     fn write(fd: usize, s: *const u8, len: usize);
 }
 
 static mut CUR_PROCESS: Option<Process> = None;
 static mut MAIN_CTX: Ctx = 0 as Ctx;
 
-extern fn interrupt(_: u32) {
+extern "C" fn interrupt(_: u32) {
     unsafe {
         if let Some(c) = CUR_PROCESS.as_ref() {
-            libttypes::ucontext::swapcontext(c.ctx, MAIN_CTX);
+            swapcontext(c.ctx, MAIN_CTX);
         }
     }
 }
@@ -53,14 +72,13 @@ extern fn interrupt(_: u32) {
 fn main() -> libloading::Result<()> {
     use libloading as lib;
     use std::env;
-    use std::sync::mpsc::{channel, Sender};
 
     let args: Vec<String> = env::args().collect();
 
     let (console_tx, console_rx): (Sender<&'static libttypes::WaitFreeBuffer>, _) = channel();
 
     let mc = unsafe {
-        MAIN_CTX = libttypes::ucontext::ucontext_alloc();
+        MAIN_CTX = ucontext_alloc();
         MAIN_CTX
     };
 
@@ -68,17 +86,29 @@ fn main() -> libloading::Result<()> {
     for (i, app_path) in args[1..].iter().enumerate() {
         let test1 = lib::Library::new(app_path)?;
         let test1_init = unsafe { test1.get(b"_start")? };
-        let test1_console = unsafe { test1.get(b"CONSOLE_BUF").map(|t| *t).expect("No console buf") };
-        console_tx.send(test1_console).expect("Couldn't send console to I/O processor");
-        run_queue.push_back(Process::new(*test1_init, Box::new([0; 100 * 1024]), format!("Test{}", i).as_bytes(), mc));
+        let test1_console = unsafe {
+            test1
+                .get(b"CONSOLE_BUF")
+                .map(|t| *t)
+                .expect("No console buf")
+        };
+        console_tx
+            .send(test1_console)
+            .expect("Couldn't send console to I/O processor");
+        run_queue.push_back(Process::new(
+            *test1_init,
+            Box::new([0; 100 * 1024]),
+            format!("Test{}", i).as_bytes(),
+            mc,
+        ));
         std::mem::forget(test1);
     }
 
-    std::thread::spawn(move || {
+    thread::spawn(move || {
         for console_buf in console_rx.iter() {
             // drain console buffer
             let mut buf = [0; 256];
-            let start = std::time::Instant::now();
+            let start = Instant::now();
             let len = console_buf.read(&mut buf);
             unsafe {
                 write(1, buf.as_ptr(), len);
@@ -86,12 +116,11 @@ fn main() -> libloading::Result<()> {
             // TODO(alevy): how long is long enough that the buffer will always be written, but not
             // _super_ duper long.
             let exec_duration = start.elapsed();
-            let sleep_duration = std::time::Duration::from_micros(1000) - exec_duration;
-            std::thread::sleep(sleep_duration);
+            let sleep_duration = Duration::from_micros(1000) - exec_duration;
+            thread::sleep(sleep_duration);
             console_tx.send(console_buf).unwrap();
         }
     });
-
 
     let tenms = ITimerval {
         it_interval: libc::timeval {
@@ -104,7 +133,7 @@ fn main() -> libloading::Result<()> {
         },
     };
     unsafe {
-        setitimer(0 /* ITIMER_PROF */, &tenms, ::std::ptr::null());
+        setitimer(0 /* ITIMER_PROF */, &tenms, std::ptr::null());
         libc::signal(libc::SIGALRM, interrupt as libc::sighandler_t);
     }
 
@@ -113,7 +142,7 @@ fn main() -> libloading::Result<()> {
             let uctx = ctx.ctx;
             unsafe {
                 CUR_PROCESS.replace(ctx);
-                libttypes::ucontext::swapcontext(mc, uctx);
+                swapcontext(mc, uctx);
                 if let Some(ctx) = CUR_PROCESS.take() {
                     run_queue.push_back(ctx);
                 }
@@ -126,4 +155,3 @@ fn main() -> libloading::Result<()> {
     println!("Done");
     Ok(())
 }
-

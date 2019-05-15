@@ -2,7 +2,6 @@
 #![no_std]
 
 use core::sync::atomic::{AtomicUsize, Ordering};
-use core::fmt::{self, Write};
 
 pub mod ucontext;
 
@@ -11,7 +10,7 @@ pub use ucontext::pause;
 pub struct WaitFreeBuffer {
     pub wcur: usize,
     pub rcur: AtomicUsize,
-    pub buf: [u8; 256]
+    pub buf: [u8; 256],
 }
 
 impl WaitFreeBuffer {
@@ -39,4 +38,3 @@ impl WaitFreeBuffer {
         len
     }
 }
-

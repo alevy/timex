@@ -1,7 +1,7 @@
 #![no_std]
 
-use libt::*;
 use core::str::from_utf8;
+use libt::*;
 
 start!({
     let name = from_utf8(args()).unwrap_or(&"");
